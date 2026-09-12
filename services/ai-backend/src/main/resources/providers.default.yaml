@@ -1,0 +1,13 @@
+primary: deepseek
+fallback: gigachat
+providers:
+  deepseek:
+    baseUrl: "https://api.deepseek.com/v1"
+    model: "deepseek-chat"
+    apiKeyEnv: "DEEPSEEK_API_KEY"
+    timeoutMs: 60000
+  gigachat:
+    baseUrl: "https://foundation-models.api.cloud.ru/v1"
+    model: "ai-sage/GigaChat3.5-432B-A28B"
+    apiKeyEnv: "CLOUD_API_KEY"
+    timeoutMs: 60000

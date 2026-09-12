@@ -53,6 +53,7 @@ message InterpretClarifyingCardRequest {
   repeated tarotbot.common.SpreadCard original_cards = 3;
   string original_question = 4;
   tarotbot.common.SpreadCard clarifying_card = 5;
+  string original_interpretation = 6;
 }
 
 message InterpretationResponse {

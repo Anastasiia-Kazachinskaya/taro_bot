@@ -1,5 +1,6 @@
 plugins {
     alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.kotlin.serialization)
     id("tarotbot.integration-test")
 }
 
@@ -14,6 +15,8 @@ dependencies {
     implementation(libs.ktor.client.content.negotiation)
     implementation(libs.ktor.serialization.kotlinx.json)
     implementation(libs.kaml)
+    implementation(libs.grpc.netty)
+    runtimeOnly(libs.logback.classic)
 
     testImplementation(libs.kotest.runner.junit5)
     testImplementation(libs.kotest.assertions.core)
@@ -22,6 +25,5 @@ dependencies {
 
     "integrationTestImplementation"(libs.ktor.client.mock)
     "integrationTestImplementation"(libs.grpc.testing)
+    "integrationTestImplementation"(libs.grpc.inprocess)
 }
-
-// DeepSeek/GigaChat provider clients + hot-reload config lands in a later phase.
