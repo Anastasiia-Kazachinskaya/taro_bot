@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package tarotbot.common;
+
+option java_package = "com.tarotbot.proto.common";
+option java_multiple_files = true;
+
+// A single tarot card as drawn for a reading, with orientation already
+// resolved (the caller decided upright vs. reversed; `meaning` is the
+// matching text for that orientation, so downstream consumers never
+// need to re-derive it).
+message Card {
+  string name = 1;
+  string arcana = 2;      // "major" | "minor"
+  string suit = 3;        // "wands" | "cups" | "swords" | "pentacles" | "" for major arcana
+  bool reversed = 4;
+  string meaning = 5;
+}
+
+message SpreadCard {
+  int32 position_index = 1;
+  string position_label = 2;
+  Card card = 3;
+}
+
+message InlineKeyboard {
+  message Button {
+    string text = 1;
+    string callback_data = 2;
+  }
+  message Row {
+    repeated Button buttons = 1;
+  }
+  repeated Row rows = 1;
+}
+
+message Error {
+  string code = 1;
+  string message = 2;
+}

@@ -1,0 +1,74 @@
+syntax = "proto3";
+
+package tarotbot.ai;
+
+import "common.proto";
+
+option java_package = "com.tarotbot.proto.ai";
+option java_multiple_files = true;
+
+// Contract between Master backend and AI backend. The three RPCs mirror the
+// three interpretation shapes the bot needs: a fresh spread, a follow-up
+// question against an existing reading, and a single clarifying card drawn
+// mid-conversation.
+service AiService {
+  rpc InterpretSpread(InterpretSpreadRequest) returns (InterpretationResponse);
+  rpc AnswerFollowup(AnswerFollowupRequest) returns (InterpretationResponse);
+  rpc InterpretClarifyingCard(InterpretClarifyingCardRequest) returns (InterpretationResponse);
+}
+
+// Runtime provider control — lets an operator flip primary/fallback without
+// redeploying (in addition to the automatic per-call fallback that always
+// applies on a primary failure).
+service AiAdminService {
+  rpc SetActiveProvider(SetActiveProviderRequest) returns (ProviderStatus);
+  rpc GetProviderStatus(GetProviderStatusRequest) returns (ProviderStatus);
+}
+
+message InterpretSpreadRequest {
+  int64 user_id = 1;
+  string question = 2;
+  string spread_name = 3;
+  repeated tarotbot.common.SpreadCard cards = 4;
+}
+
+message FollowupTurn {
+  string question = 1;
+  string answer = 2;
+}
+
+message AnswerFollowupRequest {
+  int64 user_id = 1;
+  string spread_name = 2;
+  repeated tarotbot.common.SpreadCard cards = 3;
+  string original_question = 4;
+  string original_interpretation = 5;
+  repeated FollowupTurn history = 6;
+  string new_question = 7;
+}
+
+message InterpretClarifyingCardRequest {
+  int64 user_id = 1;
+  string spread_name = 2;
+  repeated tarotbot.common.SpreadCard original_cards = 3;
+  string original_question = 4;
+  tarotbot.common.SpreadCard clarifying_card = 5;
+}
+
+message InterpretationResponse {
+  string text = 1;
+  bool truncated = 2;
+  string provider_used = 3;
+}
+
+message SetActiveProviderRequest {
+  string primary = 1;
+  string fallback = 2;
+}
+
+message GetProviderStatusRequest {}
+
+message ProviderStatus {
+  string primary = 1;
+  string fallback = 2;
+}

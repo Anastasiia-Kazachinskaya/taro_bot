@@ -1,0 +1,198 @@
+syntax = "proto3";
+
+package tarotbot.db;
+
+import "common.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_package = "com.tarotbot.proto.db";
+option java_multiple_files = true;
+
+// Contract between Master backend and DB backend. Master never talks to
+// Postgres directly; every read/write goes through one of these RPCs so
+// DB backend can stay the single owner of schema and replication concerns.
+service DbService {
+  rpc GetOrCreateUser(UserRef) returns (UserProfile);
+
+  // Conversation state — what makes Master stateless across its 3 replicas.
+  rpc GetConversationState(UserRef) returns (ConversationState);
+  rpc SaveConversationState(SaveConversationStateRequest) returns (Empty);
+
+  // Daily quota (readings + llm_requests counters).
+  rpc CheckAndConsumeQuota(ConsumeQuotaRequest) returns (ConsumeQuotaResponse);
+  rpc GetUsage(UserRef) returns (UsageSummary);
+
+  // Readings, diary (notes/resonance), history.
+  rpc SaveReading(SaveReadingRequest) returns (SaveReadingResponse);
+  rpc AppendFollowup(AppendFollowupRequest) returns (Empty);
+  rpc GetReading(GetReadingRequest) returns (Reading);
+  rpc ListReadings(ListReadingsRequest) returns (ListReadingsResponse);
+  rpc SetReadingNote(SetReadingNoteRequest) returns (Empty);
+  rpc SetReadingResonance(SetReadingResonanceRequest) returns (Empty);
+  rpc GetDiaryStats(UserRef) returns (DiaryStats);
+
+  // Settings.
+  rpc GetReversedCardsPreference(UserRef) returns (ReversedCardsPreference);
+  rpc SetReversedCardsPreference(SetReversedCardsPreferenceRequest) returns (Empty);
+
+  // /admin
+  rpc GetBotStats(GetBotStatsRequest) returns (BotStats);
+}
+
+message Empty {}
+
+message UserRef {
+  int64 user_id = 1;
+  string username = 2;
+  string first_name = 3;
+}
+
+message UserProfile {
+  int64 user_id = 1;
+  string username = 2;
+  string first_name = 3;
+  google.protobuf.Timestamp first_seen = 4;
+  google.protobuf.Timestamp last_seen = 5;
+}
+
+message ConversationState {
+  int64 user_id = 1;
+  string state = 2;
+  string context_json = 3;
+  int32 version = 4;
+}
+
+message SaveConversationStateRequest {
+  int64 user_id = 1;
+  string state = 2;
+  string context_json = 3;
+  int32 expected_version = 4;  // optimistic lock; -1 skips the check
+}
+
+message ConsumeQuotaRequest {
+  int64 user_id = 1;
+  int32 readings_limit = 2;  // 0 = unlimited
+  int32 llm_limit = 3;       // 0 = unlimited
+  bool is_reading = 4;
+  bool unlimited = 5;        // UNLIMITED_USER_IDS bypass
+}
+
+message ConsumeQuotaResponse {
+  bool allowed = 1;
+  string blocked_reason = 2;  // "readings" | "llm" | ""
+  int32 readings_used = 3;
+  int32 llm_used = 4;
+}
+
+message UsageSummary {
+  int32 readings_used = 1;
+  int32 llm_used = 2;
+  int32 readings_limit = 3;
+  int32 llm_limit = 4;
+}
+
+message SaveReadingRequest {
+  int64 user_id = 1;
+  string question = 2;
+  string spread_name = 3;
+  repeated tarotbot.common.SpreadCard spread = 4;
+  string interpretation = 5;
+}
+
+message SaveReadingResponse {
+  int64 reading_id = 1;
+}
+
+message AppendFollowupRequest {
+  int64 reading_id = 1;
+  int64 user_id = 2;
+  string question = 3;
+  string answer = 4;
+}
+
+message GetReadingRequest {
+  int64 reading_id = 1;
+  int64 user_id = 2;  // ownership check
+}
+
+message Followup {
+  string question = 1;
+  string answer = 2;
+}
+
+message Reading {
+  int64 id = 1;
+  int64 user_id = 2;
+  google.protobuf.Timestamp created_at = 3;
+  string question = 4;
+  string spread_name = 5;
+  repeated tarotbot.common.SpreadCard spread = 6;
+  string interpretation = 7;
+  string note = 8;
+  string resonance = 9;  // "yes" | "no" | ""
+  repeated Followup followups = 10;
+}
+
+message ListReadingsRequest {
+  int64 user_id = 1;
+  int32 page = 2;
+  int32 page_size = 3;
+}
+
+message ListReadingsResponse {
+  repeated Reading readings = 1;
+  int32 total_count = 2;
+}
+
+message SetReadingNoteRequest {
+  int64 reading_id = 1;
+  int64 user_id = 2;
+  string note = 3;
+}
+
+message SetReadingResonanceRequest {
+  int64 reading_id = 1;
+  int64 user_id = 2;
+  string resonance = 3;  // "yes" | "no" | "" (clear)
+}
+
+message DiaryStats {
+  int32 total_readings = 1;
+  int32 notes_count = 2;
+  int32 resonance_yes = 3;
+  int32 resonance_no = 4;
+  repeated CardFrequency top_cards = 5;
+}
+
+message CardFrequency {
+  string card_name = 1;
+  int32 count = 2;
+}
+
+message ReversedCardsPreference {
+  bool has_preference = 1;  // false = "ask each time"
+  bool reversed_enabled = 2;
+}
+
+message SetReversedCardsPreferenceRequest {
+  int64 user_id = 1;
+  bool has_preference = 2;
+  bool reversed_enabled = 3;
+}
+
+message GetBotStatsRequest {
+  int64 requesting_user_id = 1;
+}
+
+message UserActivity {
+  int64 user_id = 1;
+  string username = 2;
+  int32 readings_count = 3;
+  int32 llm_requests_count = 4;
+  google.protobuf.Timestamp last_seen = 5;
+}
+
+message BotStats {
+  int32 total_users = 1;
+  repeated UserActivity users = 2;
+}

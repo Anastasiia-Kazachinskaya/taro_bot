@@ -1,0 +1,68 @@
+syntax = "proto3";
+
+package tarotbot.gateway;
+
+import "common.proto";
+
+option java_package = "com.tarotbot.proto.gateway";
+option java_multiple_files = true;
+
+// Contract between the Gateway (Telegram long-polling) and Master backend.
+// The gateway never interprets bot logic itself — it maps a Telegram update
+// to IncomingUpdate, calls HandleUpdate, and replays the returned actions
+// back to the Telegram Bot API verbatim.
+service MasterService {
+  rpc HandleUpdate(IncomingUpdate) returns (OutgoingResponse);
+}
+
+message IncomingUpdate {
+  int64 update_id = 1;
+  int64 chat_id = 2;
+  int64 user_id = 3;
+  string username = 4;
+  string first_name = 5;
+  int64 message_id = 6;
+  string callback_query_id = 7;  // set only for callback-query updates
+
+  oneof payload {
+    string text_message = 10;
+    string callback_data = 11;
+  }
+}
+
+message OutgoingResponse {
+  repeated ResponseAction actions = 1;
+}
+
+message ResponseAction {
+  oneof action {
+    TextAction text = 1;
+    PhotoAction photo = 2;
+    EditMessageAction edit = 3;
+    AnswerCallbackAction answer_callback = 4;
+  }
+}
+
+message TextAction {
+  string text = 1;
+  tarotbot.common.InlineKeyboard keyboard = 2;
+  bool html = 3;
+}
+
+message PhotoAction {
+  bytes jpeg = 1;
+  string caption = 2;
+  tarotbot.common.InlineKeyboard keyboard = 3;
+  bool html = 4;
+}
+
+message EditMessageAction {
+  int64 message_id = 1;
+  string text = 2;
+  tarotbot.common.InlineKeyboard keyboard = 3;
+}
+
+message AnswerCallbackAction {
+  string text = 1;
+  bool show_alert = 2;
+}

@@ -1,12 +1,25 @@
 .env
-__pycache__/
-*.pyc
-.venv/
-venv/
+.env.*
+!.env.example
+
+# Gradle
+.gradle/
+**/build/
+
+# IDE
 .idea/
 .vscode/
-/data/
+*.iml
+
+# OS
 .DS_Store
-bot/tarot/rendered/
-exports/
+
 docker-compose.override.yml
+
+# Leftovers from the old Python bot, not part of the Kotlin rewrite
+.venv/
+venv/
+__pycache__/
+*.pyc
+/data/
+exports/
