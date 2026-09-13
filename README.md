@@ -39,7 +39,7 @@ flowchart LR
 
 ### Требования
 - Docker и Docker Compose
-- JDK 17+ (если нужно собирать/тестировать локально без Docker)
+- JDK 21 (если нужно собирать/тестировать локально без Docker)
 
 ### Настройка окружения
 
@@ -91,7 +91,7 @@ docker compose down
 ## Наблюдаемость
 
 - **Prometheus** — метрики со всех сервисов ([`deploy/prometheus`](./deploy/prometheus))
-- **Grafana** — готовый дашборд для обзора состояния системы ([`deploy/dashboards`](./deploy/dashboards))
+- **Grafana** — готовый дашборд для обзора состояния системы ([`deploy/grafana/provisioning/dashboards`](./deploy/grafana/provisioning/dashboards))
 - Health-эндпоинты у каждого сервиса для проверок Envoy/оркестратора
 
 ## CI/CD
