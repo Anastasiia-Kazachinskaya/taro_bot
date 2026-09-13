@@ -1,82 +1,113 @@
-# Tarot Bot
+# Taro Bot
 
-A Telegram tarot-reading bot, built as a distributed Kotlin/gRPC microservices
-system: a Telegram-facing gateway, a stateless clustered master backend
-driven by an explicit state machine, a clustered Postgres-backed DB backend,
-and a clustered AI backend with a runtime-swappable LLM provider
-(DeepSeek primary, GigaChat fallback). See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-for the full design — diagram, component responsibilities, proto contracts,
-testing strategy.
+Распределённый Telegram-бот для расклада карт Таро, переписанный на Kotlin/JVM с gRPC-коммуникацией между сервисами. Каждый бэкенд отказоустойчиво реплицирован (×3), балансировка нагрузки — через Envoy, наблюдаемость — через Prometheus/Grafana.
 
-## Features
+## Архитектура
 
-- Six spread types (one card, three cards, relationship, choice, seven
-  cards, Celtic cross), drawn from a 78-card Rider-Waite deck with optional
-  reversed cards.
-- AI-generated interpretations for a fresh spread, follow-up questions, and
-  a clarifying card drawn mid-conversation.
-- `/card <query>` — fuzzy Russian-language card lookup, no AI call.
-- Reading history, per-reading notes, and a resonance ("did it come true?")
-  marker.
-- Per-user daily quotas (readings and AI calls, independently configurable,
-  with an unlimited-user allowlist) and an admin usage summary.
-- Every service is stateless and horizontally replicated (3 instances each
-  for the master/DB/AI tiers), load-balanced through Envoy, and observable
-  via Prometheus + Grafana.
+Проект состоит из четырёх сервисов и двух общих библиотек:
 
-## Stack
+| Сервис | Роль | Реплики |
+|---|---|---|
+| **gateway** | Telegram long-polling клиент; маппит апдейты Telegram на gRPC-запросы к `master-backend` и обратно | 1 |
+| **master-backend** | Чистая state machine и оркестрация диалога; полностью **stateless** — состояние живёт в Postgres, а не в памяти инстанса | ×3 |
+| **db-backend** | Единая точка доступа к Postgres (primary + streaming-реплика); миграции через Flyway; атомарная функция проверки/списания квоты | ×3 |
+| **ai-backend** | Генерация интерпретации расклада через LLM; основной провайдер с горячим fallback на резервный, замена провайдера без рестарта | ×3 |
 
-Kotlin 2.0 / JDK 21, gRPC (`grpc-kotlin`, coroutine stubs), Gradle
-multi-module build, PostgreSQL with streaming replication (Flyway
-migrations, JetBrains Exposed), Ktor (HTTP client for Telegram/LLM calls,
-embedded metrics server), Envoy, Prometheus, Grafana, Docker Compose.
-Tests: kotest + mockk (unit), Testcontainers + in-process gRPC
-(integration).
+Общие библиотеки:
+- **`libs/resilience`** — deadlines, retry, circuit breaker для всех межсервисных вызовов
+- **`libs/observability`** — метрики Prometheus и health-эндпоинты, единые для всех сервисов
 
-## Project layout
+Весь стек поднимается одной командой через `docker-compose.yml`: сервисы, Envoy (балансировка между репликами каждого тира), Prometheus и Grafana.
 
-```
-proto/                  .proto contracts (gateway<->master<->db/ai)
-libs/
-  resilience/            shared gRPC channel factory: deadlines, retry, circuit breaker
-  observability/          Prometheus metrics + health/reflection, used by every service
-  config/                 env-var and YAML config helpers
-domain/
-  tarot-domain/           deck, spreads, fuzzy card search (pure logic)
-  tarot-render/           spread image compositing (Java2D)
-services/
-  gateway/                Telegram long-polling client
-  master-backend/         state machine + orchestration
-  db-backend/             Postgres access, quotas, diary, history
-  ai-backend/             DeepSeek/GigaChat providers, prompts
-deploy/                  Envoy, Prometheus, Grafana config
-docker-compose.yml       brings up the full system
+```mermaid
+flowchart LR
+    TG[Telegram] --> GW[gateway]
+    GW --> ENVOY[Envoy]
+    ENVOY --> MB1[master-backend x3]
+    MB1 --> DB[db-backend x3]
+    MB1 --> AI[ai-backend x3]
+    DB --> PG[(Postgres\nprimary + replica)]
+    PROM[Prometheus] -.scrape.-> MB1
+    PROM -.scrape.-> DB
+    PROM -.scrape.-> AI
+    PROM --> GRAF[Grafana]
 ```
 
-## Running it
+Подробное описание архитектуры — в [`docs/`](./docs).
 
-Copy `.env.example` to `.env` and fill in the required values (a Telegram
-bot token at minimum; `DEEPSEEK_API_KEY`/`CLOUD_API_KEY` for AI
-interpretations — the AI backend falls back from the primary to the
-secondary provider automatically if one is unavailable).
+## Быстрый старт
 
+### Требования
+- Docker и Docker Compose
+- JDK 17+ (если нужно собирать/тестировать локально без Docker)
+
+### Настройка окружения
+
+```bash
+cp .env.example .env
 ```
-docker compose up -d --build
+
+Заполните `.env` своими значениями:
+
+| Переменная | Назначение |
+|---|---|
+| `BOT_TOKEN` | Токен Telegram-бота от @BotFather |
+| `DAILY_READINGS_LIMIT` | Лимит раскладов на пользователя в сутки (0 — без лимита) |
+| `DAILY_LLM_LIMIT` | Лимит обращений к LLM в сутки (расклады + уточнения) |
+| `UNLIMITED_USER_IDS` | Telegram ID без лимита, через запятую |
+| `ADMIN_USER_IDS` | Telegram ID с доступом к команде `/admin` |
+| *(ключи LLM-провайдеров)* | Ключи основного и резервного AI-провайдера |
+
+### Запуск всего стека
+
+```bash
+docker compose up -d
 ```
 
-This starts Postgres (primary + streaming replica), three replicas each of
-the DB, AI, and master backends behind Envoy, a single gateway instance,
-Prometheus, and Grafana. Grafana is on `localhost:3000`, Prometheus on
-`localhost:9099`, Envoy's admin interface on `localhost:9901`.
+Это поднимет все 4 сервиса (в нужном количестве реплик), Envoy, Postgres (primary + реплика), Prometheus и Grafana.
 
-## Development
+Проверить состояние:
 
+```bash
+docker compose ps
 ```
+
+Остановить и убрать стек:
+
+```bash
+docker compose down
+```
+
+## Разработка
+
+Сборка и тесты:
+
+```bash
 ./gradlew build test integrationTest
 ```
 
-`integrationTest` is a separate Gradle source set (Testcontainers-backed for
-db-backend, in-process gRPC for master-backend/ai-backend) — it needs a
-running Docker daemon. CI runs the same command on every push/PR to `main`;
-`main` is protected and only accepts changes through a PR with a green
-`build-test` check.
+`integrationTest` поднимает зависимости (Postgres и др.) через Testcontainers — Docker должен быть запущен.
+
+## Наблюдаемость
+
+- **Prometheus** — метрики со всех сервисов ([`deploy/prometheus`](./deploy/prometheus))
+- **Grafana** — готовый дашборд для обзора состояния системы ([`deploy/dashboards`](./deploy/dashboards))
+- Health-эндпоинты у каждого сервиса для проверок Envoy/оркестратора
+
+## CI/CD
+
+- GitHub Actions прогоняет `build` + `test` + `integrationTest` на каждый push и pull request ([`.github/workflows`](./.github/workflows))
+- Ветка `main` защищена: прямой push запрещён, слияние возможно только через pull request с зелёной проверкой `build-test`
+
+## Структура репозитория
+
+```
+.
+├── services/           # gateway, master-backend, db-backend, ai-backend
+├── libs/                # resilience, observability — общие библиотеки
+├── proto/               # контракты gRPC
+├── deploy/              # Envoy, Prometheus, Grafana конфиги
+├── docs/                # архитектурная документация
+├── docker-compose.yml   # весь стек одним файлом
+└── .env.example         # шаблон переменных окружения
+```
