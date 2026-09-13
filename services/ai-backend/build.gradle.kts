@@ -2,6 +2,11 @@ plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.kotlin.serialization)
     id("tarotbot.integration-test")
+    application
+}
+
+application {
+    mainClass.set("com.tarotbot.aibackend.MainKt")
 }
 
 dependencies {

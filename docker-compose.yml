@@ -1,0 +1,159 @@
+x-db-backend: &db-backend
+  image: tarotbot/db-backend:local
+  build:
+    context: .
+    dockerfile: services/db-backend/Dockerfile
+  environment:
+    DB_PRIMARY_URL: "jdbc:postgresql://postgres-primary:5432/${POSTGRES_DB:-tarotbot}"
+    DB_PRIMARY_USER: "${POSTGRES_APP_USER:-tarotbot}"
+    DB_PRIMARY_PASSWORD: "${POSTGRES_APP_PASSWORD:-tarotbot}"
+    DB_REPLICA_URL: "jdbc:postgresql://postgres-replica:5432/${POSTGRES_DB:-tarotbot}"
+    DB_REPLICA_USER: "${POSTGRES_APP_USER:-tarotbot}"
+    DB_REPLICA_PASSWORD: "${POSTGRES_APP_PASSWORD:-tarotbot}"
+    # Flyway's own schema-history locking makes it safe for every replica to
+    # attempt migration on startup — whichever gets there first runs it, the
+    # others find nothing pending. Avoids needing a separate one-shot job.
+    RUN_MIGRATIONS: "true"
+  depends_on:
+    postgres-primary:
+      condition: service_healthy
+    postgres-replica:
+      condition: service_healthy
+
+x-ai-backend: &ai-backend
+  image: tarotbot/ai-backend:local
+  build:
+    context: .
+    dockerfile: services/ai-backend/Dockerfile
+  environment:
+    DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
+    CLOUD_API_KEY: "${CLOUD_API_KEY:-}"
+    PROVIDERS_CONFIG_PATH: /config/providers.yaml
+  volumes:
+    - ai_backend_config:/config
+
+x-master-backend: &master-backend
+  image: tarotbot/master-backend:local
+  build:
+    context: .
+    dockerfile: services/master-backend/Dockerfile
+  environment:
+    DB_BACKEND_TARGET: envoy:9081
+    AI_BACKEND_TARGET: envoy:9082
+    DAILY_READINGS_LIMIT: "${DAILY_READINGS_LIMIT:-10}"
+    DAILY_LLM_LIMIT: "${DAILY_LLM_LIMIT:-30}"
+    UNLIMITED_USER_IDS: "${UNLIMITED_USER_IDS:-}"
+    ADMIN_USER_IDS: "${ADMIN_USER_IDS:-}"
+  depends_on:
+    - envoy
+
+services:
+  postgres-primary:
+    image: bitnami/postgresql:latest
+    environment:
+      POSTGRESQL_REPLICATION_MODE: master
+      POSTGRESQL_REPLICATION_USER: "${POSTGRES_REPL_USER:-replicator}"
+      POSTGRESQL_REPLICATION_PASSWORD: "${POSTGRES_REPL_PASSWORD:-replicator}"
+      POSTGRESQL_USERNAME: "${POSTGRES_APP_USER:-tarotbot}"
+      POSTGRESQL_PASSWORD: "${POSTGRES_APP_PASSWORD:-tarotbot}"
+      POSTGRESQL_DATABASE: "${POSTGRES_DB:-tarotbot}"
+    volumes:
+      - pg_primary_data:/bitnami/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_APP_USER:-tarotbot}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  postgres-replica:
+    image: bitnami/postgresql:latest
+    environment:
+      POSTGRESQL_REPLICATION_MODE: slave
+      POSTGRESQL_REPLICATION_USER: "${POSTGRES_REPL_USER:-replicator}"
+      POSTGRESQL_REPLICATION_PASSWORD: "${POSTGRES_REPL_PASSWORD:-replicator}"
+      POSTGRESQL_MASTER_HOST: postgres-primary
+      POSTGRESQL_MASTER_PORT_NUMBER: "5432"
+      POSTGRESQL_PASSWORD: "${POSTGRES_APP_PASSWORD:-tarotbot}"
+    volumes:
+      - pg_replica_data:/bitnami/postgresql
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_APP_USER:-tarotbot}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  db-backend-1:
+    <<: *db-backend
+  db-backend-2:
+    <<: *db-backend
+  db-backend-3:
+    <<: *db-backend
+
+  ai-backend-1:
+    <<: *ai-backend
+  ai-backend-2:
+    <<: *ai-backend
+  ai-backend-3:
+    <<: *ai-backend
+
+  envoy:
+    image: envoyproxy/envoy:v1.30-latest
+    volumes:
+      - ./deploy/envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
+    ports:
+      - "9080:9080"
+      - "9081:9081"
+      - "9082:9082"
+      - "9901:9901"
+    depends_on:
+      - db-backend-1
+      - db-backend-2
+      - db-backend-3
+      - ai-backend-1
+      - ai-backend-2
+      - ai-backend-3
+
+  master-backend-1:
+    <<: *master-backend
+  master-backend-2:
+    <<: *master-backend
+  master-backend-3:
+    <<: *master-backend
+
+  gateway:
+    build:
+      context: .
+      dockerfile: services/gateway/Dockerfile
+    environment:
+      BOT_TOKEN: "${BOT_TOKEN:?BOT_TOKEN must be set in .env}"
+      MASTER_BACKEND_TARGET: envoy:9080
+    depends_on:
+      - master-backend-1
+      - master-backend-2
+      - master-backend-3
+
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9099:9090"
+
+  grafana:
+    image: grafana/grafana
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
+volumes:
+  pg_primary_data: {}
+  pg_replica_data: {}
+  ai_backend_config: {}
+  grafana_data: {}

@@ -1,0 +1,149 @@
+admin:
+  address:
+    socket_address: { address: 0.0.0.0, port_value: 9901 }
+
+static_resources:
+  listeners:
+    - name: master_listener
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 9080 }
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: master_ingress
+                codec_type: AUTO
+                route_config:
+                  name: master_route
+                  virtual_hosts:
+                    - name: master_vhost
+                      domains: ["*"]
+                      routes:
+                        - match: { prefix: "/" }
+                          route: { cluster: master_cluster }
+                http_filters:
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+    - name: db_listener
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 9081 }
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: db_ingress
+                codec_type: AUTO
+                route_config:
+                  name: db_route
+                  virtual_hosts:
+                    - name: db_vhost
+                      domains: ["*"]
+                      routes:
+                        - match: { prefix: "/" }
+                          route: { cluster: db_cluster }
+                http_filters:
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+    - name: ai_listener
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 9082 }
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: ai_ingress
+                codec_type: AUTO
+                route_config:
+                  name: ai_route
+                  virtual_hosts:
+                    - name: ai_vhost
+                      domains: ["*"]
+                      routes:
+                        - match: { prefix: "/" }
+                          route: { cluster: ai_cluster }
+                http_filters:
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+  clusters:
+    # Retries and deadlines are a client-side concern owned by libs/resilience
+    # (ResilientChannelFactory) — Envoy here only load-balances across healthy
+    # replicas and evicts dead ones via gRPC health checks. Deliberately no
+    # Envoy-side retry policy, to avoid double-retry storms on top of the
+    # client's own retry budget.
+    - name: master_cluster
+      connect_timeout: 2s
+      type: STRICT_DNS
+      lb_policy: ROUND_ROBIN
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          explicit_http_config:
+            http2_protocol_options: {}
+      health_checks:
+        - timeout: 2s
+          interval: 5s
+          unhealthy_threshold: 2
+          healthy_threshold: 1
+          grpc_health_check: { service_name: "" }
+      load_assignment:
+        cluster_name: master_cluster
+        endpoints:
+          - lb_endpoints:
+              - endpoint: { address: { socket_address: { address: master-backend-1, port_value: 9090 } } }
+              - endpoint: { address: { socket_address: { address: master-backend-2, port_value: 9090 } } }
+              - endpoint: { address: { socket_address: { address: master-backend-3, port_value: 9090 } } }
+
+    - name: db_cluster
+      connect_timeout: 2s
+      type: STRICT_DNS
+      lb_policy: ROUND_ROBIN
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          explicit_http_config:
+            http2_protocol_options: {}
+      health_checks:
+        - timeout: 2s
+          interval: 5s
+          unhealthy_threshold: 2
+          healthy_threshold: 1
+          grpc_health_check: { service_name: "" }
+      load_assignment:
+        cluster_name: db_cluster
+        endpoints:
+          - lb_endpoints:
+              - endpoint: { address: { socket_address: { address: db-backend-1, port_value: 9091 } } }
+              - endpoint: { address: { socket_address: { address: db-backend-2, port_value: 9091 } } }
+              - endpoint: { address: { socket_address: { address: db-backend-3, port_value: 9091 } } }
+
+    - name: ai_cluster
+      connect_timeout: 2s
+      type: STRICT_DNS
+      lb_policy: ROUND_ROBIN
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          explicit_http_config:
+            http2_protocol_options: {}
+      health_checks:
+        - timeout: 2s
+          interval: 5s
+          unhealthy_threshold: 2
+          healthy_threshold: 1
+          grpc_health_check: { service_name: "" }
+      load_assignment:
+        cluster_name: ai_cluster
+        endpoints:
+          - lb_endpoints:
+              - endpoint: { address: { socket_address: { address: ai-backend-1, port_value: 9092 } } }
+              - endpoint: { address: { socket_address: { address: ai-backend-2, port_value: 9092 } } }
+              - endpoint: { address: { socket_address: { address: ai-backend-3, port_value: 9092 } } }
